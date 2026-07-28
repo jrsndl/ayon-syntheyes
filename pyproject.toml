@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "ayon-syntheyes"
-version = "0.5.0+dev"
+version = "0.1.0"
 description = "Boris FX SynthEyes integration for AYON"
 authors = ["AYON Community"]
 readme = "README.md"

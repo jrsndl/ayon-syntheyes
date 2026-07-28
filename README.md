@@ -37,7 +37,7 @@ designed for an artist-driven local session.
    python create_package.py
    ```
 
-2. Upload `package/syntheyes-0.5.0+dev.zip` in AYON's **Bundles & Addons**
+2. Upload `package/syntheyes-0.1.0.zip` in AYON's **Bundles & Addons**
    administration page and add it to the production bundle.
 3. In the Applications addon, create or update a `syntheyes` application
    variant. On this workstation the executable is:

@@ -2,7 +2,7 @@
 
 name = "syntheyes"
 title = "SynthEyes"
-version = "0.5.0+dev"
+version = "0.1.0"
 app_host_name = "syntheyes"
 client_dir = "ayon_syntheyes"
 project_can_override_addon_version = True
