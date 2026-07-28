@@ -1,0 +1,1 @@
+"""SynthEyes launch hooks."""
