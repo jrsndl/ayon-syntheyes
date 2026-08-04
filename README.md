@@ -37,7 +37,7 @@ designed for an artist-driven local session.
    python create_package.py
    ```
 
-2. Upload `package/syntheyes-0.1.0.zip` in AYON's **Bundles & Addons**
+2. Upload `package/syntheyes-0.1.16.zip` in AYON's **Bundles & Addons**
    administration page and add it to the production bundle.
 3. In the Applications addon, create or update a `syntheyes` application
    variant. On this workstation the executable is:
@@ -113,18 +113,24 @@ Create a **Review** product in AYON's Publisher. Suggested creator variants
 come from **SynthEyes > Creator plugins > Create Review > Default variants**
 and default to `Main`.
 
-The creator settings also control the image extension, viewport-item and grid
+Review creator instances remain stored in SynthEyes Scene Information after
+publishing and follow the version parsed from the current `.sni` workfile.
+
+The creator settings also control viewport-item and grid
 visibility, square-pixel output, anti-aliasing/motion-blur quality, shutter
 angle and phase, SynthEyes frame/time burn-in, and representation tags.
-Supported output extensions are image formats only:
-`jpg`, `jpeg`, `png`, `tif`, `tiff`, `tga`, `sgi`, and `exr`. Movie/container
-formats are rejected.
+Review output supports a ProRes `.mov` container or a numbered image sequence
+in the configured SynthEyes-supported image format.
 
 During extraction, AYON temporarily activates the Perspective view and invokes
 the same **Preview Movie** operation as the Perspective **RENDER** button. The
-result is a numbered image-sequence representation with the configured tags.
+result is either a single ProRes MOV or an image-sequence representation with
+the configured tags.
 Include the `review` tag for AYON's Extract Review plugin and `burnin` when the
 source should also be eligible for configured Extract Burnin processing.
+Core Extract Review is profile-driven; its matching profile must include the
+`syntheyes` host (or use an unrestricted host filter), the `review` product
+base type, and the applicable task type.
 
 ## Processed plate publishing
 

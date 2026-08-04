@@ -1,4 +1,4 @@
-"""Render SynthEyes Perspective viewport review sequences."""
+"""Render a SynthEyes Perspective viewport review to ProRes MOV."""
 
 from __future__ import annotations
 
@@ -12,8 +12,11 @@ from ayon_core.pipeline import PublishError
 from ayon_syntheyes.api import SynthEyesHost
 from ayon_syntheyes.api.review import (
     collect_review_files,
-    review_filename,
-    validate_image_extension,
+    collect_review_movie,
+    native_review_sequence_filename,
+    review_movie_filename,
+    validate_review_output_extension,
+    validate_review_extension,
 )
 
 
@@ -25,11 +28,12 @@ class ExtractReview(pyblish.api.InstancePlugin):
     families: ClassVar[list[str]] = ["review"]
     label = "Render SynthEyes Review"
 
-    file_extension = "jpg"
+    file_extension = "mov"
+    compression = "ProRes"
     show_all_viewport_items = False
     show_grid = False
     square_pixel_output = True
-    anti_aliasing_motion_blur = "Medium"
+    anti_aliasing_motion_blur = "None"
     shutter_angle = 180.0
     phase = -90.0
     frame_time_burnin = True
@@ -44,6 +48,7 @@ class ExtractReview(pyblish.api.InstancePlugin):
         )
         for key in (
             "file_extension",
+            "compression",
             "show_all_viewport_items",
             "show_grid",
             "square_pixel_output",
@@ -61,9 +66,12 @@ class ExtractReview(pyblish.api.InstancePlugin):
         if host is None:
             raise PublishError("The SynthEyes host is not installed.")
         try:
-            extension = validate_image_extension(self.file_extension)
+            extension = validate_review_output_extension(self.file_extension)
         except ValueError as exc:
             raise PublishError(str(exc)) from exc
+        is_movie = extension == "mov"
+        if is_movie:
+            validate_review_extension(extension)
 
         frame_start = int(
             instance.data.get(
@@ -77,15 +85,29 @@ class ExtractReview(pyblish.api.InstancePlugin):
                 instance.context.data.get("frameEnd", host.level.AnimEnd()),
             )
         )
+        active_shot = host.level.Active().Get("cam").Get("shot")
+        fps = float(
+            instance.data.get(
+                "fps",
+                instance.context.data.get("fps", active_shot.Get("rate")),
+            )
+        )
         product_name = instance.data["productName"]
         staging_dir = Path(
             tempfile.mkdtemp(prefix=f"ayon_syntheyes_{product_name}_")
         )
-        output_file = staging_dir / review_filename(
-            product_name,
-            frame_start,
-            extension,
-        )
+        if is_movie:
+            output_file = staging_dir / review_movie_filename(
+                product_name, extension
+            )
+            last_output_file = output_file
+        else:
+            output_file = staging_dir / native_review_sequence_filename(
+                product_name, frame_start, extension
+            )
+            last_output_file = staging_dir / native_review_sequence_filename(
+                product_name, frame_end, extension
+            )
 
         options = {
             "show_all_viewport_items": self.show_all_viewport_items,
@@ -95,14 +117,26 @@ class ExtractReview(pyblish.api.InstancePlugin):
             "shutter_angle": self.shutter_angle,
             "phase": self.phase,
             "frame_time_burnin": self.frame_time_burnin,
+            "compression": self.compression,
+            "last_output_file": str(last_output_file),
         }
         host.render_review(str(output_file), options)
-        files = collect_review_files(staging_dir, extension)
-        if not files:
-            raise PublishError(
-                f"SynthEyes did not render any '.{extension}' review frames "
-                f"to '{staging_dir}'."
-            )
+        if is_movie:
+            movie = collect_review_movie(staging_dir, output_file.name)
+            if movie is None:
+                raise PublishError(
+                    f"SynthEyes did not render the ProRes review movie "
+                    f"to '{staging_dir}'."
+                )
+            representation_files = movie.name
+        else:
+            files = collect_review_files(staging_dir, extension)
+            if not files:
+                raise PublishError(
+                    f"SynthEyes did not render any '.{extension}' review "
+                    f"frames to '{staging_dir}'."
+                )
+            representation_files = [path.name for path in files]
 
         instance.data.update(
             {
@@ -110,16 +144,21 @@ class ExtractReview(pyblish.api.InstancePlugin):
                 "families": list(
                     set(instance.data.get("families", [])) | {"review"}
                 ),
+                "productBaseType": "review",
                 "frameStart": frame_start,
                 "frameEnd": frame_end,
-                "representations": [
-                    {
-                        "name": extension,
-                        "ext": extension,
-                        "files": [path.name for path in files],
-                        "stagingDir": str(staging_dir),
-                        "tags": list(self.tags),
-                    }
-                ],
+                "fps": fps,
+            }
+        )
+        instance.data.setdefault("representations", []).append(
+            {
+                "name": extension,
+                "ext": extension,
+                "files": representation_files,
+                "stagingDir": str(staging_dir),
+                "frameStart": frame_start,
+                "frameEnd": frame_end,
+                "fps": fps,
+                "tags": list(self.tags),
             }
         )

@@ -56,8 +56,15 @@ class ExtractProcessedRender(pyblish.api.InstancePlugin):
         host = SynthEyesHost.get_host()
         if host is None:
             raise PublishError("The SynthEyes host is not installed.")
+        creator_attributes = instance.data.get("creator_attributes") or {}
+        file_extension = creator_attributes.get(
+            "file_extension", self.file_extension
+        )
+        reset_filtering_color = creator_attributes.get(
+            "reset_filtering_color", self.reset_filtering_color
+        )
         try:
-            extension = validate_image_extension(self.file_extension)
+            extension = validate_image_extension(file_extension)
         except ValueError as exc:
             raise PublishError(str(exc)) from exc
 
@@ -85,7 +92,7 @@ class ExtractProcessedRender(pyblish.api.InstancePlugin):
         host.render_processed_sequence(
             str(output_file),
             {
-                "reset_filtering_color": self.reset_filtering_color,
+                "reset_filtering_color": reset_filtering_color,
                 "rgb_included": self.rgb_included,
                 "alpha_included": self.alpha_included,
                 "meshes_included": self.meshes_included,

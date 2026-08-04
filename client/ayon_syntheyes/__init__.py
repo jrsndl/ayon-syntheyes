@@ -26,3 +26,8 @@ def __getattr__(name: str):
 
         return SynthEyesAddon
     raise AttributeError(name)
+
+
+def __dir__() -> list[str]:
+    """Expose the lazily imported addon class to AYON discovery."""
+    return sorted({*globals(), "SynthEyesAddon"})

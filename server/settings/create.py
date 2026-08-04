@@ -13,12 +13,19 @@ class CreateReviewModel(BaseSettingsModel):
         default_factory=lambda: ["Main"],
         title="Default variants",
     )
-    file_extension: Literal[
-        "jpg", "jpeg", "png", "tif", "tiff", "tga", "sgi", "exr"
-    ] = SettingsField(
-        "jpg",
+    file_extension: str = SettingsField(
+        "mov",
         title="File extension",
-        description="Image sequences only; container formats are not allowed.",
+        description=(
+            "MOV or any filename-safe image-sequence extension supported "
+            "by SynthEyes, without a leading dot."
+        ),
+        pattern=r"^[A-Za-z0-9]+$",
+    )
+    compression: Literal["ProRes"] = SettingsField(
+        "ProRes",
+        title="Compression",
+        description="MOV reviews use SynthEyes' native ProRes writer.",
     )
     show_all_viewport_items: bool = SettingsField(
         False,
@@ -38,8 +45,12 @@ class CreateReviewModel(BaseSettingsModel):
         "Moblur Medium",
         "Moblur High",
     ] = SettingsField(
-        "Medium",
+        "None",
         title="Anti-aliasing and motion blur",
+        description=(
+            "Default is None. SynthEyes 2026 may become unstable when its "
+            "Preview Movie motion-blur modes are used."
+        ),
     )
     shutter_angle: float = SettingsField(
         180.0,
@@ -124,11 +135,12 @@ DEFAULT_CREATE_SETTINGS = {
     "CreateReview": {
         "enabled": True,
         "default_variants": ["Main"],
-        "file_extension": "jpg",
+        "file_extension": "mov",
+        "compression": "ProRes",
         "show_all_viewport_items": False,
         "show_grid": False,
         "square_pixel_output": True,
-        "anti_aliasing_motion_blur": "Medium",
+        "anti_aliasing_motion_blur": "None",
         "shutter_angle": 180.0,
         "phase": -90.0,
         "frame_time_burnin": True,

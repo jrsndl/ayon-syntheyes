@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import ClassVar
 
 from ayon_applications import LaunchTypes, PreLaunchHook
@@ -26,8 +27,16 @@ class SynthEyesPreLaunch(PreLaunchHook):
         workfile = self.data.get("workfile_path")
         if not workfile and self.data.get("start_last_workfile"):
             workfile = self.data.get("last_workfile_path")
-        if workfile and workfile not in original_args:
-            original_args.append(workfile)
+        if workfile:
+            workfile = os.path.normpath(workfile)
+            if os.path.isfile(workfile):
+                if workfile not in original_args:
+                    original_args.append(workfile)
+            else:
+                self.log.warning(
+                    "Skipping missing SynthEyes workfile: %s",
+                    workfile,
+                )
 
         wrapped = get_ayon_launcher_args(
             "run",

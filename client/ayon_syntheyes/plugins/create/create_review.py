@@ -4,7 +4,7 @@ from ayon_syntheyes.api.creator import SynthEyesCreator
 
 
 class CreateReview(SynthEyesCreator):
-    """Create a review image sequence from the Perspective viewport."""
+    """Create a review from the Perspective viewport."""
 
     identifier = "io.ayon.creators.syntheyes.review"
     label = "Review"
@@ -13,3 +13,11 @@ class CreateReview(SynthEyesCreator):
     icon = "video-camera"
     enabled = True
     default_variants = ["Main"]
+
+    def create(self, product_name, instance_data, pre_create_data):
+        """Create and persist the review instance in the SynthEyes scene."""
+        return super().create(
+            product_name,
+            instance_data,
+            pre_create_data,
+        )

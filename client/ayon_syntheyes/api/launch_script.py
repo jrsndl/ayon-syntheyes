@@ -34,7 +34,7 @@ def main(launch_args: list[str]) -> int:
 
     process = subprocess.Popen(host_args, env=os.environ.copy())
     try:
-        timeout = float(os.getenv("AYON_SYNTHEYES_CONNECT_TIMEOUT", "15"))
+        timeout = float(os.getenv("AYON_SYNTHEYES_CONNECT_TIMEOUT", "60"))
         level = connect(sypy, port, pin, timeout)
     except Exception:
         process.terminate()

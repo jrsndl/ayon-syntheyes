@@ -20,7 +20,7 @@ class SynthEyesAddon(AYONAddon, IHostAddon):
 
     def initialize(self, settings: dict[str, Any]) -> None:
         host_settings = settings.get(self.name, {})
-        self.connect_timeout = float(host_settings.get("connect_timeout", 15))
+        self.connect_timeout = float(host_settings.get("connect_timeout", 60))
         self.sy_py_directory = host_settings.get("sy_py_directory", "")
         self.enabled = True
 

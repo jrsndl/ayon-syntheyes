@@ -85,7 +85,11 @@ class SynthEyesHost(HostBase, IWorkfileHost, ILoadHost, IPublishHost):
             raise RuntimeError("A destination is required for an unsaved scene.")
         path = os.path.abspath(requested_path)
         self.level.SetSNIFileName(path)
-        self._click_action("File/Save")
+        self.level.ClickTopMenuAndWait("File", "Save")
+        if not os.path.isfile(path):
+            raise RuntimeError(
+                f"SynthEyes did not create the workfile '{path}'."
+            )
         return path
 
     def _click_action(self, action: str) -> None:
@@ -160,6 +164,23 @@ class SynthEyesHost(HostBase, IWorkfileHost, ILoadHost, IPublishHost):
             if item.get("instance_id") != instance_id
         ]
         self.write_create_instances(instances)
+
+    def keep_publish_instance(self, instance_id: str) -> bool:
+        """Keep a creator instance active after a successful publish."""
+        instances = self.get_publish_instances()
+        found = False
+        for item in instances:
+            if item.get("instance_id") != instance_id:
+                continue
+            item["active"] = True
+            item["followWorkfileVersion"] = True
+            item["productBaseType"] = "review"
+            item["productType"] = "review"
+            found = True
+            break
+        if found:
+            self.write_create_instances(instances)
+        return found
 
     def _read_metadata(self) -> dict:
         description = self.level.Scene().Get("info") or ""
@@ -239,7 +260,11 @@ class SynthEyesHost(HostBase, IWorkfileHost, ILoadHost, IPublishHost):
         output_file: str,
         options: dict,
     ) -> None:
-        """Render a Perspective Preview Movie image sequence."""
+        """Render a Perspective Preview Movie or image sequence."""
+        output_path = Path(output_file)
+        is_movie = output_path.suffix.lower() == ".mov"
+        if is_movie and options.get("compression") != "ProRes":
+            raise RuntimeError("SynthEyes MOV reviews must use ProRes.")
         active = self.level.Active()
         camera = active.Get("cam")
         shot = camera.Get("shot")
@@ -249,14 +274,27 @@ class SynthEyesHost(HostBase, IWorkfileHost, ILoadHost, IPublishHost):
             "previewFile": shot.Get("previewFile"),
             "shutterAngle": shot.Get("shutterAngle"),
             "shutterPhase": shot.Get("shutterPhase"),
+            "frameCount": shot.Get("frameCount"),
+            "start": shot.Get("start"),
+            "stop": shot.Get("stop"),
             "burnInWhen": scene.Get("burnInWhen"),
         }
         previous_view = self.level.View()
-        self.level.Begin()
+        previous_anim_start = self.level.AnimStart()
+        previous_anim_end = self.level.AnimEnd()
+        actual_length = int(shot.Get("actualLength"))
+        if actual_length < 1:
+            raise RuntimeError("The active SynthEyes shot has no readable frames.")
+        render_start = 0
+        render_end = actual_length - 1
+        self.level.BeginShotChanges(shot)
         try:
             shot.Set("previewFile", os.path.abspath(output_file))
             shot.Set("shutterAngle", float(options["shutter_angle"]))
             shot.Set("shutterPhase", float(options["phase"]))
+            shot.Set("frameCount", actual_length)
+            shot.Set("start", render_start)
+            shot.Set("stop", render_end)
             burn_when = int(previous["burnInWhen"])
             if options["frame_time_burnin"]:
                 burn_when |= 2
@@ -267,7 +305,9 @@ class SynthEyesHost(HostBase, IWorkfileHost, ILoadHost, IPublishHost):
             self.level.Cancel()
             raise
         else:
-            self.level.Accept("Configure AYON review")
+            self.level.AcceptShotChanges(shot, "Configure AYON review")
+        self.level.SetAnimStart(render_start)
+        self.level.SetAnimEnd(render_end)
 
         popup = None
         try:
@@ -320,24 +360,132 @@ class SynthEyesHost(HostBase, IWorkfileHost, ILoadHost, IPublishHost):
                 raise RuntimeError(
                     "Preview Movie Start button is unavailable."
                 )
-            start.ClickAndWait()
+            start.ClickAndContinue()
+            if is_movie:
+                self._wait_for_review_movie(output_path, actual_length)
+            else:
+                self._wait_for_image_sequence(
+                    Path(options["last_output_file"]), actual_length
+                )
         finally:
             if popup is not None and popup.IsValid():
                 cancel = popup.ByID(2)
                 if cancel.IsValid():
                     cancel.ClickAndWait()
             self.level.SetView(previous_view)
-            self.level.Begin()
+            self.level.SetAnimStart(previous_anim_start)
+            self.level.SetAnimEnd(previous_anim_end)
+            self.level.BeginShotChanges(shot)
             try:
                 shot.Set("previewFile", previous["previewFile"])
                 shot.Set("shutterAngle", previous["shutterAngle"])
                 shot.Set("shutterPhase", previous["shutterPhase"])
+                shot.Set("frameCount", previous["frameCount"])
+                shot.Set("start", previous["start"])
+                shot.Set("stop", previous["stop"])
                 scene.Set("burnInWhen", previous["burnInWhen"])
             except Exception:
                 self.level.Cancel()
                 raise
             else:
-                self.level.Accept("Restore Preview Movie settings")
+                self.level.AcceptShotChanges(
+                    shot, "Restore Preview Movie settings"
+                )
+
+    @staticmethod
+    def _is_finalized_mov(path: Path) -> bool:
+        """Return whether MOV has complete atoms and a moov atom."""
+        try:
+            file_size = path.stat().st_size
+            with path.open("rb") as stream:
+                offset = 0
+                found_moov = False
+                while offset < file_size:
+                    stream.seek(offset)
+                    header = stream.read(8)
+                    if len(header) != 8:
+                        return False
+                    atom_size = int.from_bytes(header[:4], "big")
+                    atom_type = header[4:8]
+                    header_size = 8
+                    if atom_size == 1:
+                        extended = stream.read(8)
+                        if len(extended) != 8:
+                            return False
+                        atom_size = int.from_bytes(extended, "big")
+                        header_size = 16
+                    elif atom_size == 0:
+                        atom_size = file_size - offset
+                    if (
+                        atom_size < header_size
+                        or offset + atom_size > file_size
+                    ):
+                        return False
+                    found_moov = found_moov or atom_type == b"moov"
+                    offset += atom_size
+                return found_moov and offset == file_size
+        except OSError:
+            return False
+
+    @staticmethod
+    def _wait_for_review_movie(path: Path, frame_count: int) -> None:
+        """Wait for Preview Movie without touching SyPy during encoding."""
+        timeout = min(1800.0, max(300.0, float(frame_count) * 10.0))
+        deadline = time.monotonic() + timeout
+        last_size = -1
+        stable_since = None
+        while time.monotonic() < deadline:
+            try:
+                size = path.stat().st_size
+            except OSError:
+                size = -1
+
+            if (
+                size >= 4096
+                and size == last_size
+                and SynthEyesHost._is_finalized_mov(path)
+            ):
+                if stable_since is None:
+                    stable_since = time.monotonic()
+                elif time.monotonic() - stable_since >= 5.0:
+                    return
+            else:
+                stable_since = None
+            last_size = size
+            time.sleep(0.5)
+
+        raise RuntimeError(
+            f"Timed out after {timeout:.0f}s waiting for SynthEyes to "
+            f"finalize '{path}'. Last observed size: {last_size} bytes."
+        )
+
+    @staticmethod
+    def _wait_for_image_sequence(path: Path, frame_count: int) -> None:
+        """Wait for the expected final frame without touching SyPy."""
+        timeout = min(1800.0, max(300.0, float(frame_count) * 10.0))
+        deadline = time.monotonic() + timeout
+        last_size = -1
+        stable_since = None
+        while time.monotonic() < deadline:
+            try:
+                size = path.stat().st_size
+            except OSError:
+                size = -1
+
+            if size > 0 and size == last_size:
+                if stable_since is None:
+                    stable_since = time.monotonic()
+                elif time.monotonic() - stable_since >= 2.0:
+                    return
+            else:
+                stable_since = None
+            last_size = size
+            time.sleep(0.5)
+
+        raise RuntimeError(
+            f"Timed out after {timeout:.0f}s waiting for the last SynthEyes "
+            f"review frame '{path}'. Last observed size: {last_size} bytes."
+        )
 
     def render_processed_sequence(
         self,
@@ -350,6 +498,22 @@ class SynthEyesHost(HostBase, IWorkfileHost, ILoadHost, IPublishHost):
         scene = self.level.Scene()
         output = Path(output_file)
         output.parent.mkdir(parents=True, exist_ok=True)
+        actual_length = int(shot.Get("actualLength"))
+        if actual_length < 1:
+            raise RuntimeError("The active SynthEyes shot has no frames.")
+        frame_match = re.match(r"^(.*?)(\d+)$", output.stem)
+        if frame_match is None:
+            raise RuntimeError(
+                "Processed sequence filename must end in a frame number: "
+                f"{output.name}"
+            )
+        first_frame = int(frame_match.group(2))
+        frame_width = len(frame_match.group(2))
+        last_frame = first_frame + actual_length - 1
+        last_output = output.with_name(
+            f"{frame_match.group(1)}{last_frame:0{frame_width}d}"
+            f"{output.suffix}"
+        )
         previous = {
             "renderFile": shot.Get("renderFile"),
             "renderSettings": shot.Get("renderSettings"),
@@ -440,7 +604,8 @@ class SynthEyesHost(HostBase, IWorkfileHost, ILoadHost, IPublishHost):
                     raise RuntimeError(
                         "Save Sequence Start button is unavailable."
                     )
-                start.ClickAndWait()
+                start.ClickAndContinue()
+                self._wait_for_image_sequence(last_output, actual_length)
             finally:
                 if popup is not None and popup.IsValid():
                     close = popup.ByID(2)

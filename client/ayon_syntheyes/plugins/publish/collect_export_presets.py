@@ -17,6 +17,10 @@ from ayon_syntheyes.api.export import (
     product_name,
     workfile_version,
 )
+from ayon_syntheyes.plugins.create.create_exports import (
+    EXPORT_CREATOR_IDENTIFIER,
+    preset_attribute_key,
+)
 
 
 class CollectExportPresets(pyblish.api.ContextPlugin):
@@ -76,11 +80,26 @@ class CollectExportPresets(pyblish.api.ContextPlugin):
             )
             return
 
+        configured_names = list(
+            dict.fromkeys(profile.get("export_presets", []))
+        )
+        enabled_names = self._consume_export_controllers(
+            context, configured_names
+        )
+        if enabled_names is None:
+            self.log.info(
+                "No SynthEyes Exports instance exists for the current task."
+            )
+            return
+        if not enabled_names:
+            self.log.info("All SynthEyes export presets are disabled.")
+            return
+
         anatomy = context.data["anatomy"]
         project_entity = context.data["projectEntity"]
         folder_entity = context.data["folderEntity"]
         used_product_names: set[str] = set()
-        for configured_name in profile.get("export_presets", []):
+        for configured_name in enabled_names:
             preset = presets_by_name.get(configured_name.lower())
             if preset is None:
                 raise PublishError(
@@ -135,3 +154,36 @@ class CollectExportPresets(pyblish.api.ContextPlugin):
                         "workfileVersion": version,
                     }
                 )
+
+    def _consume_export_controllers(
+        self,
+        context: pyblish.api.Context,
+        configured_names: list[str],
+    ) -> list[str] | None:
+        """Remove controller instances and return their enabled presets."""
+        controllers = [
+            instance
+            for instance in list(context)
+            if instance.data.get("creator_identifier")
+            == EXPORT_CREATOR_IDENTIFIER
+        ]
+        if not controllers:
+            return None
+
+        enabled: set[str] = set()
+        for instance in controllers:
+            context.remove(instance)
+            if not instance.data.get("publish", True):
+                continue
+            attributes = instance.data.get("creator_attributes") or {}
+            stored_names = instance.data.get("syntheyesExportPresetNames")
+            allowed_names = set(stored_names or configured_names)
+            for name in configured_names:
+                if name not in allowed_names:
+                    continue
+                if attributes.get(preset_attribute_key(name), True):
+                    enabled.add(name.lower())
+
+        return [
+            name for name in configured_names if name.lower() in enabled
+        ]

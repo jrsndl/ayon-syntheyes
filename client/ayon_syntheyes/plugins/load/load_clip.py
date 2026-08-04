@@ -79,7 +79,18 @@ class LoadClip(load.LoaderPlugin):
         host = self._host()
         path = self._representation_path(context)
         shot_name = namespace or name or self._default_name(context)
-        shot = self._add_shot(host, path, shot_name, entity_fps(context))
+        existing_shots = host.level.Shots()
+        replace_empty_scene = (
+            len(existing_shots) == 1
+            and str(existing_shots[0].Get("readerType")) == "0"
+        )
+        shot = self._add_shot(
+            host,
+            path,
+            shot_name,
+            entity_fps(context),
+            replace_empty_scene=replace_empty_scene,
+        )
         container = self._container(context, shot, shot_name)
         host.add_container(container)
         return {"shot": shot, "container": container}
@@ -89,8 +100,17 @@ class LoadClip(load.LoaderPlugin):
         host = self._host()
         path = self._representation_path(context)
         shot_name = container["namespace"]
-        shot = self._add_shot(host, path, shot_name, entity_fps(context))
-        self._delete_shot(host, container.get("shot_id"))
+        shot = self._add_shot(
+            host,
+            path,
+            shot_name,
+            entity_fps(context),
+            replace_shot_ids=(
+                {str(container["shot_id"])}
+                if container.get("shot_id")
+                else set()
+            ),
+        )
         updated = self._container(context, shot, shot_name)
         host.add_container(updated)
         return {"shot": shot, "container": updated}
@@ -111,15 +131,36 @@ class LoadClip(load.LoaderPlugin):
         path: str,
         name: str,
         fps: float,
+        replace_shot_ids: Optional[set[str]] = None,
+        replace_empty_scene: bool = False,
     ) -> Any:
-        # AddShot is intentionally used instead of AddStereoShot.
-        shot = host.level.AddShot(path, 0.0)
+        replace_shot_ids = replace_shot_ids or set()
+        previous_info = None
+        previous_workfile = None
+        if replace_empty_scene:
+            # Deleting SynthEyes' live placeholder camera can trigger its
+            # imminent-crash handler. Replace the empty scene through the
+            # purpose-built API instead, retaining AYON metadata and the
+            # current Workfiles path.
+            previous_info = host.level.Scene().Get("info") or ""
+            previous_workfile = host.level.SNIFileName() or ""
+            shot = host.level.NewSceneAndShot(path, 0.0)
+            if previous_workfile:
+                host.level.SetSNIFileName(previous_workfile)
+        else:
+            # AddShot is intentionally used instead of AddStereoShot.
+            shot = host.level.AddShot(path, 0.0)
         if shot is None:
             raise RuntimeError(f"SynthEyes failed to load clip '{path}'.")
 
         host.level.BeginShotChanges(shot)
         try:
-            shot.SetName(name)
+            # SynthEyes initializes scripted shots with a 10-frame working
+            # range. Boris' SyPy documentation explicitly requires copying
+            # the detected reader length into frameCount after opening.
+            actual_length = int(shot.Get("actualLength"))
+            if actual_length > 0:
+                shot.Set("frameCount", actual_length)
             shot.Set("matchFrameNumbers", int(self.match_frame_numbers))
             shot.Set("rate", float(fps))
             shot.Set("processFormat", DEPTH_VALUES[self.process_depth])
@@ -134,7 +175,35 @@ class LoadClip(load.LoaderPlugin):
             raise
         else:
             host.level.AcceptShotChanges(shot, f"AYON load {name}")
-            host.level.SetActive(shot.Get("cam"))
+
+        if previous_info is not None:
+            host.level.Begin()
+            try:
+                host.level.Scene().Set("info", previous_info)
+            except Exception:
+                host.level.Cancel()
+                raise
+            else:
+                host.level.Accept("Restore AYON scene information")
+
+        # SetActive must be inside a regular undo block. AddShot briefly shows
+        # the imported image but leaves the previous tracker host active after
+        # AcceptShotChanges, which makes a successful load look as if it
+        # disappeared. Delete only the explicitly replaced shots (or null
+        # reader placeholders collected before AddShot).
+        if not replace_empty_scene:
+            host.level.Begin()
+            try:
+                host.level.SetActive(shot.Get("cam"))
+                for candidate in host.level.Shots():
+                    if str(candidate.Get("uniqueID")) in replace_shot_ids:
+                        host.level.Delete(candidate.Get("cam"))
+                host.level.ReloadAll()
+            except Exception:
+                host.level.Cancel()
+                raise
+            else:
+                host.level.Accept(f"Activate AYON clip {name}")
         return shot
 
     @staticmethod
@@ -153,7 +222,7 @@ class LoadClip(load.LoaderPlugin):
             return
         host.level.Begin()
         try:
-            host.level.Delete(shot)
+            host.level.Delete(shot.Get("cam"))
         except Exception:
             host.level.Cancel()
             raise

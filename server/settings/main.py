@@ -70,7 +70,7 @@ class SynthEyesSettings(BaseSettingsModel):
     """Project settings used by the client bridge."""
 
     connect_timeout: float = SettingsField(
-        15.0,
+        60.0,
         title="Connection timeout",
         description="Seconds to wait for the SynthEyes SyPy listener.",
         ge=1.0,
@@ -99,7 +99,7 @@ class SynthEyesSettings(BaseSettingsModel):
 
 
 DEFAULT_SYNTHEYES_SETTINGS = {
-    "connect_timeout": 15.0,
+    "connect_timeout": 60.0,
     "sy_py_directory": "",
     "load_clip": {
         "match_frame_numbers": True,

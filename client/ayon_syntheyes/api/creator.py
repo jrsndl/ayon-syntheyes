@@ -17,6 +17,11 @@ class SynthEyesCreator(Creator):
         instance_data: dict,
         pre_create_data: dict,
     ) -> CreatedInstance:
+        instance_data = dict(instance_data)
+        instance_data["active"] = True
+        instance_data["productBaseType"] = self.product_base_type
+        instance_data["productType"] = self.product_type
+        instance_data["followWorkfileVersion"] = True
         instance = CreatedInstance(
             product_base_type=self.product_base_type,
             product_type=self.product_type,
@@ -29,12 +34,33 @@ class SynthEyesCreator(Creator):
         return instance
 
     def collect_instances(self) -> None:
-        for instance_data in self.host.get_publish_instances():
+        stored_instances = self.host.get_publish_instances()
+        normalized_instances = []
+        changed = False
+        for instance_data in stored_instances:
             if instance_data.get("creator_identifier") != self.identifier:
+                normalized_instances.append(instance_data)
                 continue
+            # Normalize older stored instances and keep them available after
+            # publishing. CreatedInstance treats product types as immutable,
+            # so these values must be present before reconstruction.
+            original_data = instance_data
+            instance_data = dict(original_data)
+            instance_data.update(
+                {
+                    "active": True,
+                    "productBaseType": self.product_base_type,
+                    "productType": self.product_type,
+                    "followWorkfileVersion": True,
+                }
+            )
+            normalized_instances.append(instance_data)
+            changed = changed or instance_data != original_data
             self._add_instance_to_context(
                 CreatedInstance.from_existing(instance_data, self)
             )
+        if changed:
+            self.host.write_create_instances(normalized_instances)
 
     def update_instances(self, update_list: list[tuple]) -> None:
         stored = self.host.get_publish_instances()

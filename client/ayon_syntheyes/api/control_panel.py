@@ -25,6 +25,7 @@ class SynthEyesControlPanel(QtWidgets.QWidget):
         tools = [
             ("Workfiles", host_tools.show_workfiles),
             ("Load", host_tools.show_loader),
+            ("Create", partial(host_tools.show_publisher, tab="create")),
             ("Publish", partial(host_tools.show_publisher, tab="publish")),
             ("Manage", host_tools.show_scene_inventory),
         ]
